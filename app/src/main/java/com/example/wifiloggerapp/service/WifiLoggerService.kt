@@ -1,49 +1,139 @@
 package com.example.wifiloggerapp.service
-import android.app.*
-import android.content.*
-import android.net.*
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
-import android.os.*
+import android.os.Build
+import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.wifiloggerapp.R
 import com.example.wifiloggerapp.data.AppDatabase
 import com.example.wifiloggerapp.data.WifiEventEntity
 import com.example.wifiloggerapp.ui.MainActivity
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+
 class WifiLoggerService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private lateinit var cm: ConnectivityManager
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var connectivityManager: ConnectivityManager
+
     private val channelId = "wifi_logger_channel"
-    private val notifId = 101
+    private val notificationId = 101
+
     private var lastSsid: String? = null
     private var lastBssid: String? = null
-    private val callback = object : ConnectivityManager.NetworkCallback() {
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            val (s,b)=getWifiInfo(); lastSsid=s; lastBssid=b; insert("CONNECT",s,b)
+            val (ssid, bssid) = getCurrentWifiInfo()
+            lastSsid = ssid
+            lastBssid = bssid
+            insertEvent("CONNECT", ssid, bssid)
         }
-        override fun onLost(network: Network) { insert("DISCONNECT",lastSsid, lastBssid) }
+
+        override fun onLost(network: Network) {
+            val ssid = lastSsid ?: "UNKNOWN"
+            val bssid = lastBssid
+            insertEvent("DISCONNECT", ssid, bssid)
+        }
     }
+
     override fun onCreate() {
-        super.onCreate(); cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        createChannel(); startForeground(notifId, buildNotif()); registerCallback()
+        super.onCreate()
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        createNotificationChannel()
+        startForeground(notificationId, buildNotification())
+        registerWifiCallback()
     }
-    override fun onBind(i: Intent?) = null
-    override fun onDestroy() { super.onDestroy(); cm.unregisterNetworkCallback(callback); scope.cancel() }
-    override fun onStartCommand(i: Intent?, f: Int, s: Int) = START_STICKY
-    private fun registerCallback() {
-        val req = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
-        cm.registerNetworkCallback(req, callback)
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
     }
-    private fun insert(type:String,s:String?,b:String?){ val dao=AppDatabase.getInstance().wifiEventDao(); scope.launch{ dao.insert(WifiEventEntity(ssid=s,bssid=b,eventType=type,timestamp=System.currentTimeMillis())) }}
-    private fun getWifiInfo():Pair<String?,String?>{
-        val wm=getSystemService(Context.WIFI_SERVICE) as WifiManager; val i=wm.connectionInfo
-        if(i!=null && i.networkId!=-1){ var ssid=i.ssid; if(ssid?.startsWith(""")==true) ssid=ssid.substring(1,ssid.length-1); return ssid to i.bssid }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+        }
+        serviceScope.cancel()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun registerWifiCallback() {
+        val request = android.net.NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        connectivityManager.registerNetworkCallback(request, networkCallback)
+    }
+
+    private fun insertEvent(eventType: String, ssid: String?, bssid: String?) {
+        val dao = AppDatabase.getInstance().wifiEventDao()
+        serviceScope.launch {
+            val event = WifiEventEntity(
+                ssid = ssid,
+                bssid = bssid,
+                eventType = eventType,
+                timestamp = System.currentTimeMillis()
+            )
+            dao.insert(event)
+        }
+    }
+
+    private fun getCurrentWifiInfo(): Pair<String?, String?> {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val info = wifiManager.connectionInfo
+        if (info != null && info.networkId != -1) {
+            var ssid = info.ssid
+            if (ssid != null && ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                ssid = ssid.substring(1, ssid.length - 1)
+            }
+            val bssid = info.bssid
+            return ssid to bssid
+        }
         return null to null
     }
-    private fun createChannel(){ if(Build.VERSION.SDK_INT>=26){ val ch=NotificationChannel(channelId,"Wi-Fi Logger",NotificationManager.IMPORTANCE_LOW); getSystemService(NotificationManager::class.java).createNotificationChannel(ch) } }
-    private fun buildNotif():Notification{
-        val intent=Intent(this,MainActivity::class.java)
-        val pi=PendingIntent.getActivity(this,0,intent,PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        return NotificationCompat.Builder(this,channelId).setContentTitle("Wi-Fi Logger Running").setContentText("Listening for Wi-Fi events").setSmallIcon(R.drawable.ic_launcher_foreground).setContentIntent(pi).setOngoing(true).build()
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val chan = NotificationChannel(
+                channelId,
+                "Wi-Fi Logger",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(chan)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Wi-Fi Logger Running")
+            .setContentText("Listening for Wi-Fi connect/disconnect events")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
     }
 }
