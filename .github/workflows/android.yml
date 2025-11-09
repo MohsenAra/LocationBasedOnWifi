@@ -1,16 +1,39 @@
 name: Android CI
+
 on:
-  push: { branches: [ "main", "master" ] }
-  pull_request: { branches: [ "main", "master" ] }
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: 'temurin', java-version: '17' }
-      - run: chmod +x ./gradlew
-      - run: ./gradlew assembleDebug --stacktrace
-      - uses: actions/upload-artifact@v4
-        with: { name: WifiLoggerApp-debug-apk, path: app/build/outputs/apk/debug/app-debug.apk }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download Gradle wrapper jar
+        run: |
+          mkdir -p gradle/wrapper
+          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: WifiLoggerApp-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
