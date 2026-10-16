@@ -23,7 +23,12 @@ android {
         }
     }
     buildFeatures { viewBinding true }
-    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        // Enable core library desugaring so java.time APIs work across Android versions
+        coreLibraryDesugaringEnabled true
+    }
     kotlinOptions { jvmTarget = '17' }
 }
 
@@ -37,4 +42,7 @@ dependencies {
     implementation "androidx.room:room-ktx:2.6.1"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.6"
     implementation "androidx.activity:activity-ktx:1.9.2"
+
+    // Required for java.time and other JDK APIs compatibility on older Android runtimes
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.3"
 }
