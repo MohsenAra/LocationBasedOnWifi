@@ -1,10 +1,12 @@
 package com.example.wifiloggerapp.ui
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -14,101 +16,181 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.wifiloggerapp.R
-import com.example.wifiloggerapp.WifiLoggerApp
-import com.example.wifiloggerapp.data.WifiEventEntity
+import com.example.wifiloggerapp.data.AppDatabase
 import com.example.wifiloggerapp.service.WifiLoggerService
+import com.example.wifiloggerapp.util.ReportCalculator
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.io.File
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.util.Calendar
 
 class MainActivity : AppCompatActivity() {
 
-    private val PERMISSION_REQUEST_CODE = 1001
+    private val permissionRequestCode = 1001
 
-    private lateinit var tvStatus: TextView
-    private lateinit var tvLogCount: TextView
-    private lateinit var tvLogs: TextView
-    private lateinit var etFilterSSID: EditText
-    private lateinit var btnFilter: Button
-    private lateinit var btnClear: Button
+    private lateinit var etFilterSsid: EditText
+    private lateinit var btnAnnualReport: Button
+    private lateinit var tvReport: TextView
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    private val reportCalculator = ReportCalculator()
+    private val dao by lazy { AppDatabase.getInstance().wifiEventDao() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         initViews()
-        setupListeners()
-        observeDatabase()
         checkPermissionsAndStartService()
+        loadCurrentReportPreview()
     }
 
     private fun initViews() {
-        tvStatus = findViewById(R.id.tvStatus)
-        tvLogCount = findViewById(R.id.tvLogCount)
-        tvLogs = findViewById(R.id.tvLogs)
-        etFilterSSID = findViewById(R.id.etFilterSSID)
-        // رفع باگ کرش: تبدیل به Button به جای TextView
-        btnFilter = findViewById(R.id.btnFilter)
-        btnClear = findViewById(R.id.btnClear)
-    }
+        etFilterSsid = findViewById(R.id.etFilterSsid)
+        btnAnnualReport = findViewById(R.id.btnAnnualReport)
+        tvReport = findViewById(R.id.tvReport)
 
-    private fun setupListeners() {
-        btnFilter.setOnClickListener {
-            val query = etFilterSSID.text.toString().trim()
-            if (query.isNotEmpty()) {
-                filterLogs(query)
-            } else {
-                observeDatabase()
-            }
-        }
-
-        btnClear.setOnClickListener {
-            etFilterSSID.setText("")
-            lifecycleScope.launch(Dispatchers.IO) {
-                WifiLoggerApp.database.wifiEventDao().deleteAll()
-            }
+        btnAnnualReport.setOnClickListener {
+            showYearPickerDialog()
         }
     }
 
-    private fun observeDatabase() {
+    private fun loadCurrentReportPreview() {
         lifecycleScope.launch {
-            WifiLoggerApp.database.wifiEventDao().getAllEventsFlow().collectLatest { events ->
-                renderEvents(events)
+            val now = System.currentTimeMillis()
+            val zone = ZoneId.systemDefault()
+            val start = LocalDate.now(zone).withDayOfYear(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val end = LocalDate.now(zone).withDayOfYear(LocalDate.now(zone).lengthOfYear()).atTime(LocalTime.MAX).atZone(zone).toInstant().toEpochMilli()
+
+            val events = withContext(Dispatchers.IO) {
+                dao.getEventsBetween(start, minOf(now, end))
             }
+
+            if (events.isEmpty()) {
+                tvReport.text = "هیچ رویدادی برای سال جاری ثبت نشده است."
+                return@launch
+            }
+
+            val sessions = reportCalculator.computeSessions(events, start, minOf(now, end))
+            val reports = reportCalculator.buildSsidReports(sessions, zone)
+
+            val summary = StringBuilder()
+            reports.forEach { report ->
+                summary.append("SSID: ${report.ssid ?: "<UNKNOWN>"}\n")
+                summary.append("کل زمان: ${reportCalculator.formatDurationHumanReadable(report.totalDurationMillis)}\n")
+                report.daily.forEach { day ->
+                    summary.append("  ${day.date}: ${reportCalculator.formatDurationHumanReadable(day.totalDurationMillis)}\n")
+                }
+                summary.append("\n")
+            }
+            tvReport.text = summary.toString().ifEmpty { "هیچ داده‌ای برای نمایش وجود ندارد." }
         }
     }
 
-    private fun filterLogs(ssid: String) {
+    private fun showYearPickerDialog() {
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val years = (currentYear downTo currentYear - 5).map { it.toString() }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("انتخاب سال")
+            .setItems(years) { _, which ->
+                val selectedYear = years[which].toInt()
+                generateAnnualReport(selectedYear)
+            }
+            .setNegativeButton("لغو", null)
+            .show()
+    }
+
+    private fun generateAnnualReport(year: Int) {
+        val filter = etFilterSsid.text.toString().trim()
         lifecycleScope.launch {
-            val filtered = withContext(Dispatchers.IO) {
-                WifiLoggerApp.database.wifiEventDao().getEventsBySSID(ssid)
+            tvReport.text = "در حال ساخت گزارش سال ${year}..."
+
+            val zone = ZoneId.systemDefault()
+            val start = LocalDate.of(year, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val end = LocalDate.of(year, 12, 31).atTime(LocalTime.MAX).atZone(zone).toInstant().toEpochMilli()
+
+            val events = withContext(Dispatchers.IO) {
+                if (filter.isNotEmpty()) {
+                    dao.getEventsForSsidBetween(filter, start, end)
+                } else {
+                    dao.getEventsBetween(start, end)
+                }
             }
-            renderEvents(filtered)
+
+            if (events.isEmpty()) {
+                tvReport.text = "هیچ رویدادی برای سال ${year} پیدا نشد."
+                return@launch
+            }
+
+            val sessions = reportCalculator.computeSessions(events, start, end)
+            val reports = reportCalculator.buildSsidReports(sessions, zone)
+
+            val summary = StringBuilder()
+            reports.forEach { report ->
+                summary.append("SSID: ${report.ssid ?: "<UNKNOWN>"}\n")
+                summary.append("کل زمان: ${reportCalculator.formatDurationHumanReadable(report.totalDurationMillis)}\n")
+                report.daily.forEach { day ->
+                    summary.append("  ${day.date}: ${reportCalculator.formatDurationHumanReadable(day.totalDurationMillis)}\n")
+                }
+                summary.append("\n")
+            }
+
+            tvReport.text = summary.toString()
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("گزارش سال ${year}")
+                .setMessage(summary.toString())
+                .setPositiveButton("خروجی CSV") { _, _ -> exportCsv(year, reports) }
+                .setNegativeButton("بستن", null)
+                .show()
         }
     }
 
-    private fun renderEvents(events: List<WifiEventEntity>) {
-        tvLogCount.text = "تعداد لاگ‌ها: ${events.size}"
-        if (events.isEmpty()) {
-            tvLogs.text = "هیچ اتصالی ثبت نشده است."
-            return
-        }
+    private fun exportCsv(year: Int, reports: List<com.example.wifiloggerapp.util.SsidReport>) {
+        lifecycleScope.launch {
+            val csv = withContext(Dispatchers.Default) {
+                reportCalculator.exportToCsv(reports, ZoneId.systemDefault())
+            }
 
-        val sb = StringBuilder()
-        for (item in events) {
-            val formattedDate = dateFormat.format(Date(item.timestamp))
-            val action = if (item.eventType == "CONNECTED") "✅ ورود" else "❌ خروج"
-            sb.append("$formattedDate | $action\n")
-            sb.append("شبکه: ${item.ssid} (${item.bssid ?: "نامشخص"})\n")
-            sb.append("------------------------------------\n")
+            withContext(Dispatchers.IO) {
+                var targetFile: File? = null
+
+                try {
+                    val docDir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                    } else {
+                        getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                    }
+                    if (docDir != null && (docDir.exists() || docDir.mkdirs())) {
+                        targetFile = File(docDir, "wifi_report_${year}.csv")
+                        targetFile.writeText(csv)
+                    }
+                } catch (_: Exception) {
+                }
+
+                if (targetFile == null) {
+                    val fallbackDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                    if (fallbackDir != null && (fallbackDir.exists() || fallbackDir.mkdirs())) {
+                        targetFile = File(fallbackDir, "wifi_report_${year}.csv")
+                        targetFile.writeText(csv)
+                    }
+                }
+
+                val msg = if (targetFile != null && targetFile.exists()) {
+                    "گزارش صادر شد: ${targetFile.absolutePath}"
+                } else {
+                    "خطا در نوشتن فایل گزارش."
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                }
+            }
         }
-        tvLogs.text = sb.toString()
     }
 
     private fun checkPermissionsAndStartService() {
@@ -117,23 +199,18 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
 
-        // افزودن دسترسی نوتیفیکیشن برای اندروید 13 و بالاتر
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            permissions += Manifest.permission.POST_NOTIFICATIONS
         }
 
-        val missingPermissions = permissions.filter {
+        val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (missingPermissions.isEmpty()) {
+        if (missing.isEmpty()) {
             startWifiService()
         } else {
-            ActivityCompat.requestPermissions(
-                this,
-                missingPermissions.toTypedArray(),
-                PERMISSION_REQUEST_CODE
-            )
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), permissionRequestCode)
         }
     }
 
@@ -145,10 +222,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 startService(intent)
             }
-            tvStatus.text = "وضعیت پایش: فعال در پس‌زمینه"
         } catch (e: Exception) {
-            tvStatus.text = "خطا در شروع سرویس: ${e.message}"
-            Toast.makeText(this, "خطا: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "خطا در شروع سرویس: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -158,12 +233,11 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSION_REQUEST_CODE) {
+        if (requestCode == permissionRequestCode) {
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                 startWifiService()
             } else {
-                tvStatus.text = "نیاز به اعطای دسترسی لوکیشن و نوتیفیکیشن"
-                Toast.makeText(this, "بدون مجوز، نام وای‌فای ثبت نخواهد شد.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "بدون مجوزهای مناسب، دسترسی به SSID فعال نخواهد شد.", Toast.LENGTH_LONG).show()
             }
         }
     }
