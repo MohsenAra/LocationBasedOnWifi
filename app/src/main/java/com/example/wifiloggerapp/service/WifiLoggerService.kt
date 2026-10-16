@@ -3,18 +3,18 @@ package com.example.wifiloggerapp.service
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.example.wifiloggerapp.db.AppDatabase
-import com.example.wifiloggerapp.db.WifiEventEntity
+import com.example.wifiloggerapp.data.AppDatabase
+import com.example.wifiloggerapp.data.WifiEventEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-class WifiLoggerService {
+class WifiLoggerService(private val context: Context) {
 
     private val TAG = "WifiLoggerService"
     private val serviceScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 
-    private fun insertEvent(eventType: String, ssid: String?, bssid: String?) {
+    fun insertEvent(eventType: String, ssid: String?, bssid: String?) {
         Log.i(TAG, "insertEvent: type=$eventType ssid=$ssid bssid=$bssid")
         val dao = AppDatabase.getInstance().wifiEventDao()
         serviceScope.launch {
@@ -31,7 +31,7 @@ class WifiLoggerService {
                 // append debug line to internal file for offline debugging
                 try {
                     val debugLine = "${System.currentTimeMillis()} | $eventType | ${ssid ?: "<null>"} | ${bssid ?: "<null>"}\n"
-                    applicationContext.openFileOutput("wifi_debug.log", Context.MODE_APPEND).use { it.write(debugLine.toByteArray(Charsets.UTF_8)) }
+                    context.openFileOutput("wifi_debug.log", Context.MODE_APPEND).use { it.write(debugLine.toByteArray(Charsets.UTF_8)) }
                 } catch (t: Throwable) {
                     Log.w(TAG, "Failed to write debug log file", t)
                 }
@@ -41,7 +41,7 @@ class WifiLoggerService {
                     val b = Intent("com.example.wifiloggerapp.EVENT_INSERTED")
                     b.putExtra("eventType", eventType)
                     b.putExtra("ssid", ssid)
-                    sendBroadcast(b)
+                    context.sendBroadcast(b)
                 } catch (_: Exception) {
                 }
 
