@@ -1,88 +1,171 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:background="@color/bg_light"
+    android:orientation="vertical">
 
+    <!-- نوار هدر بالا (Header Card) -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="@color/card_bg"
+        app:cardCornerRadius="0dp"
+        app:cardElevation="2dp"
+        app:strokeWidth="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="پایشگر اتصالات وای‌فای"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvServiceStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="● سرویس فعال و در حال ثبت"
+                        android:textColor="@color/status_connected_text"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnErrorLogs"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="10dp"
+                    android:text="⚠️ خطاها"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnManageAliases"
+                    style="@style/Widget.MaterialComponents.Button"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="12dp"
+                    android:text="🏷️ نام‌گذاری"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- کادر جستجو و فیلتر مدرن -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/search_box_bg"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp">
+
+                <EditText
+                    android:id="@+id/etFilter"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="🔍 جستجو بر اساس نام شبکه، نام دلخواه یا تاریخ..."
+                    android:inputType="text"
+                    android:paddingVertical="8dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_muted"
+                    android:textSize="13sp" />
+
+                <ImageButton
+                    android:id="@+id/btnClearFilter"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    android:tint="@color/text_muted"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- وضعیت نتایج فیلتر -->
+            <TextView
+                android:id="@+id/tvFilterStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="تعداد رویدادها: 0"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- لایوت خالی (Empty State) -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btnTest"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:text="رویداد تست" />
-
-        <Button
-            android:id="@+id/btnManageAliases"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="4dp"
-            android:text="نام‌گذاری شبکه" />
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/btnShowServiceLogs"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="نمایش لاگ خام سرویس (Show Service Logs)" />
-
-    <!-- بخش فیلتر و جستجو -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <EditText
-            android:id="@+id/etFilter"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="🔍 فیلتر نام شبکه یا نام دلخواه..."
-            android:inputType="text"
-            android:padding="8dp"
-            android:textSize="14sp" />
-
-        <Button
-            android:id="@+id/btnClearFilter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:text="✕" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/tvFilterStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:layout_marginBottom="4dp"
-        android:text=""
-        android:textSize="12sp" />
-
-    <ScrollView
+        android:id="@+id/layoutEmpty"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="4dp"
-        android:fillViewport="true">
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
 
         <TextView
-            android:id="@+id/tvReport"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="14sp"
-            android:lineSpacingExtra="3dp" />
-    </ScrollView>
+            android:text="📶"
+            android:textSize="48sp" />
+
+        <TextView
+            android:id="@+id/tvEmptyTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="هنوز اتصالی ثبت نشده است"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvEmptyDesc"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="سرویس در پس‌زمینه فعال است و به محض ورود یا خروج از هر وای‌فای، رویداد آن به طور خودکار ثبت می‌شود."
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- لیست کارت‌های وقایع -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvEvents"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingTop="8dp"
+        android:paddingBottom="16dp" />
 
 </LinearLayout>

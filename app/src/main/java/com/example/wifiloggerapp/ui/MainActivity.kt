@@ -10,9 +10,10 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -21,10 +22,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.example.wifiloggerapp.R
 import com.example.wifiloggerapp.data.AppDatabase
 import com.example.wifiloggerapp.data.WifiEventEntity
 import com.example.wifiloggerapp.service.WifiLoggerService
+import com.example.wifiloggerapp.util.AppErrorLogger
 import com.example.wifiloggerapp.util.JalaliDateHelper
 import com.example.wifiloggerapp.util.NetworkAliasManager
 import kotlinx.coroutines.Dispatchers
@@ -37,14 +41,18 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionRequestCode = 1001
 
-    private lateinit var btnTest: Button
     private lateinit var btnManageAliases: Button
-    private lateinit var btnShowServiceLogs: Button
+    private lateinit var btnErrorLogs: Button
     private lateinit var etFilter: EditText
-    private lateinit var btnClearFilter: Button
+    private lateinit var btnClearFilter: ImageButton
     private lateinit var tvFilterStatus: TextView
-    private lateinit var tvReport: TextView
+    private lateinit var tvServiceStatus: TextView
+    private lateinit var rvEvents: RecyclerView
+    private lateinit var layoutEmpty: LinearLayout
+    private lateinit var tvEmptyTitle: TextView
+    private lateinit var tvEmptyDesc: TextView
 
+    private lateinit var adapter: WifiEventAdapter
     private lateinit var aliasManager: NetworkAliasManager
     private var allEvents: List<WifiEventEntity> = emptyList()
     private var currentFilterQuery: String = ""
@@ -62,64 +70,52 @@ class MainActivity : AppCompatActivity() {
         aliasManager = NetworkAliasManager(this)
 
         initViews()
+        setupRecyclerView()
         setupListeners()
         observeEvents()
         checkPermissionsAndStartService()
     }
 
     private fun initViews() {
-        btnTest = findViewById(R.id.btnTest)
         btnManageAliases = findViewById(R.id.btnManageAliases)
-        btnShowServiceLogs = findViewById(R.id.btnShowServiceLogs)
+        btnErrorLogs = findViewById(R.id.btnErrorLogs)
         etFilter = findViewById(R.id.etFilter)
         btnClearFilter = findViewById(R.id.btnClearFilter)
         tvFilterStatus = findViewById(R.id.tvFilterStatus)
-        tvReport = findViewById(R.id.tvReport)
+        tvServiceStatus = findViewById(R.id.tvServiceStatus)
+        rvEvents = findViewById(R.id.rvEvents)
+        layoutEmpty = findViewById(R.id.layoutEmpty)
+        tvEmptyTitle = findViewById(R.id.tvEmptyTitle)
+        tvEmptyDesc = findViewById(R.id.tvEmptyDesc)
+    }
+
+    private fun setupRecyclerView() {
+        adapter = WifiEventAdapter(aliasManager) { event ->
+            val ssid = event.ssid
+            if (!ssid.isNullOrBlank() && ssid != "<unknown ssid>") {
+                showEditAliasDialog(initialSsid = ssid, isNew = false)
+            } else {
+                Toast.makeText(this, "امکان نام‌گذاری برای شبکه ناشناخته وجود ندارد", Toast.LENGTH_SHORT).show()
+            }
+        }
+        rvEvents.layoutManager = LinearLayoutManager(this)
+        rvEvents.adapter = adapter
     }
 
     private fun setupListeners() {
-        btnTest.setOnClickListener {
-            val testSsid = "Test-WiFi-${System.currentTimeMillis() % 1000}"
-            val testIntent = Intent(this, WifiLoggerService::class.java).apply {
-                action = WifiLoggerService.ACTION_LOG_EVENT
-                putExtra(WifiLoggerService.EXTRA_EVENT_TYPE, "CONNECTED")
-                putExtra(WifiLoggerService.EXTRA_SSID, testSsid)
-                putExtra(WifiLoggerService.EXTRA_BSSID, "00:11:22:33:44:55")
-            }
-            try {
-                ContextCompat.startForegroundService(this, testIntent)
-                Toast.makeText(this, "رویداد تستی ارسال شد ($testSsid)", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                WifiLoggerService.logEventDirect(this, "CONNECTED", testSsid, "00:11:22:33:44:55")
-                Toast.makeText(this, "رویداد تستی ثبت شد ($testSsid)", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         btnManageAliases.setOnClickListener {
             showManageAliasesDialog()
         }
 
-        btnShowServiceLogs.setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
-                val text = try {
-                    applicationContext.openFileInput("wifi_debug.log").bufferedReader().use { it.readText() }
-                } catch (t: Throwable) {
-                    "(هنوز فایلی برای لاگ ثبت نشده است)"
-                }
-                withContext(Dispatchers.Main) {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("لاگ خام سرویس (Service Debug Log)")
-                        .setMessage(if (text.isBlank()) "(فایل لاگ خالی است)" else text)
-                        .setPositiveButton("بستن", null)
-                        .show()
-                }
-            }
+        btnErrorLogs.setOnClickListener {
+            showErrorLogsDialog()
         }
 
         etFilter.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 currentFilterQuery = s?.toString()?.trim() ?: ""
+                btnClearFilter.visibility = if (currentFilterQuery.isNotEmpty()) View.VISIBLE else View.GONE
                 renderFilteredEvents()
             }
             override fun afterTextChanged(s: Editable?) {}
@@ -139,7 +135,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 registerReceiver(refreshReceiver, filter)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppErrorLogger.logError(this, "MainActivity", "خطا در ثبت گیرنده پیام", e)
+        }
         loadEventsFromDb()
     }
 
@@ -158,7 +156,7 @@ class MainActivity : AppCompatActivity() {
                     renderFilteredEvents()
                 }
             } catch (e: Exception) {
-                Log.w("MainActivity", "Failed to observe events", e)
+                AppErrorLogger.logError(this@MainActivity, "MainActivity", "خطا در دریافت وقایع از پایگاه داده", e)
             }
         }
     }
@@ -171,7 +169,9 @@ class MainActivity : AppCompatActivity() {
                     allEvents = events
                     renderFilteredEvents()
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                AppErrorLogger.logError(this@MainActivity, "MainActivity", "خطا در بازخوانی وقایع", e)
+            }
         }
     }
 
@@ -191,54 +191,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (query.isNotEmpty()) {
-            tvFilterStatus.text = "فیلتر فعال: نمایش ${filtered.size} رویداد از مجموع ${allEvents.size}"
+            tvFilterStatus.text = "فیلتر فعال: نمایش ${filtered.size} رویداد از ${allEvents.size}"
         } else {
             tvFilterStatus.text = "تعداد کل رویدادها: ${allEvents.size}"
         }
 
         if (allEvents.isEmpty()) {
-            tvReport.text = "هنوز هیچ رویدادی ثبت نشده است.\nسرویس در پس‌زمینه فعال است و به محض اتصال به وای‌فای لاگ ثبت می‌شود."
-            return
+            layoutEmpty.visibility = View.VISIBLE
+            rvEvents.visibility = View.GONE
+            tvEmptyTitle.text = "هنوز اتصالی ثبت نشده است"
+            tvEmptyDesc.text = "سرویس در پس‌زمینه فعال است و به محض اتصال یا قطع از هر وای‌فای، رویداد در اینجا ثبت خواهد شد."
+        } else if (filtered.isEmpty()) {
+            layoutEmpty.visibility = View.VISIBLE
+            rvEvents.visibility = View.GONE
+            tvEmptyTitle.text = "رویدادی یافت نشد"
+            tvEmptyDesc.text = "هیچ نتیجه‌ای مطابق با عبارت «$currentFilterQuery» پیدا نشد."
+        } else {
+            layoutEmpty.visibility = View.GONE
+            rvEvents.visibility = View.VISIBLE
+            adapter.submitList(filtered)
         }
-
-        if (filtered.isEmpty()) {
-            tvReport.text = "هیچ رویدادی مطابق با عبارت «$currentFilterQuery» یافت نشد."
-            return
-        }
-
-        val sb = StringBuilder()
-        for (item in filtered.take(100)) {
-            val shamsiDate = JalaliDateHelper.formatShamsiDateTime(item.timestamp)
-            val isConnect = item.eventType.equals("CONNECTED", ignoreCase = true)
-            val action = if (isConnect) "🟢 ورود (CONNECT)" else "🔴 خروج (DISCONNECT)"
-            val rawSsid = item.ssid ?: "<نامشخص>"
-            val customAlias = aliasManager.getAlias(item.ssid)
-            val bssid = item.bssid ?: "<نامشخص>"
-
-            val networkTitle = if (!customAlias.isNullOrBlank()) {
-                "🏷️ $customAlias (SSID: $rawSsid)"
-            } else {
-                "📡 $rawSsid"
-            }
-
-            sb.append("$action\n")
-            sb.append("تاریخ و ساعت شمسی: $shamsiDate\n")
-            sb.append("شبکه: $networkTitle\n")
-            sb.append("مک آدرس (BSSID): $bssid\n")
-            sb.append("────────────────────────\n")
-        }
-
-        tvReport.text = sb.toString()
     }
 
     private fun showManageAliasesDialog() {
-        // Collect known unique SSIDs from events
         val knownSsids = allEvents.mapNotNull { it.ssid }
             .filter { it.isNotBlank() && it != "<unknown ssid>" }
             .distinct()
             .toMutableList()
 
-        // Also add any SSIDs currently stored in aliases
         val allStored = aliasManager.getAllAliases().keys
         for (s in allStored) {
             if (!knownSsids.contains(s)) {
@@ -258,7 +238,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         AlertDialog.Builder(this)
-            .setTitle("انتخاب شبکه برای نام‌گذاری")
+            .setTitle("مدیریت نام‌های دلخواه شبکه‌ها")
             .setItems(items.toTypedArray()) { _, which ->
                 if (which == 0) {
                     showEditAliasDialog(initialSsid = "", isNew = true)
@@ -285,7 +265,7 @@ class MainActivity : AppCompatActivity() {
 
         val currentAlias = if (initialSsid.isNotEmpty()) aliasManager.getAlias(initialSsid) ?: "" else ""
         val etAlias = EditText(this).apply {
-            hint = "نام دلخواه شما (مثلاً: خانه، محل کار، کافه)"
+            hint = "نام دلخواه (مثلاً: خانه، شرکت، دانشگاه)"
             setText(currentAlias)
         }
 
@@ -293,7 +273,7 @@ class MainActivity : AppCompatActivity() {
             layout.addView(TextView(this).apply { text = "نام شبکه (SSID) را وارد کنید:" })
             layout.addView(etSsid)
         } else {
-            layout.addView(TextView(this).apply { text = "شبکه: $initialSsid" })
+            layout.addView(TextView(this).apply { text = "شبکه انتخابی: $initialSsid" })
         }
 
         layout.addView(TextView(this).apply {
@@ -327,6 +307,19 @@ class MainActivity : AppCompatActivity() {
         dialogBuilder.show()
     }
 
+    private fun showErrorLogsDialog() {
+        val errorText = AppErrorLogger.getErrorLogs(this)
+        AlertDialog.Builder(this)
+            .setTitle("لاگ خطاهای برنامه (Error Log)")
+            .setMessage(errorText)
+            .setPositiveButton("بستن", null)
+            .setNeutralButton("پاکسازی لاگ") { _, _ ->
+                AppErrorLogger.clearErrorLogs(this)
+                Toast.makeText(this, "فایل لاگ خطاها پاکسازی شد", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
     private fun checkPermissionsAndStartService() {
         val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -356,8 +349,12 @@ class MainActivity : AppCompatActivity() {
         try {
             val serviceIntent = Intent(this, WifiLoggerService::class.java)
             ContextCompat.startForegroundService(this, serviceIntent)
+            tvServiceStatus.text = "● سرویس فعال و در حال ثبت"
+            tvServiceStatus.setTextColor(ContextCompat.getColor(this, R.color.status_connected_text))
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error starting service", e)
+            AppErrorLogger.logError(this, "MainActivity", "خطا در شروع سرویس پس‌زمینه", e)
+            tvServiceStatus.text = "⚠️ خطا در شروع سرویس: ${e.message}"
+            tvServiceStatus.setTextColor(ContextCompat.getColor(this, R.color.status_disconnected_text))
             Toast.makeText(this, "خطا در شروع سرویس: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }

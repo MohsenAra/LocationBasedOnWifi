@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#1976D2</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="primary_light">#E3F2FD</color>
+    <color name="accent">#00897B</color>
+
+    <color name="bg_light">#F5F7FA</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="card_stroke">#E2E8F0</color>
+
+    <color name="text_primary">#1E293B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="text_muted">#94A3B8</color>
+
+    <!-- وضعیت اتصال -->
+    <color name="status_connected_bg">#E8F5E9</color>
+    <color name="status_connected_text">#1B5E20</color>
+    <color name="status_connected_stroke">#A5D6A7</color>
+
+    <!-- وضعیت قطع اتصال -->
+    <color name="status_disconnected_bg">#FFEBEE</color>
+    <color name="status_disconnected_text">#B71C1C</color>
+    <color name="status_disconnected_stroke">#FFCDD2</color>
+
+    <color name="alias_badge_bg">#EDE7F6</color>
+    <color name="alias_badge_text">#4A148C</color>
+</resources>

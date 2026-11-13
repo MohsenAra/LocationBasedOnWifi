@@ -24,6 +24,9 @@ import androidx.core.app.ServiceCompat
 import com.example.wifiloggerapp.data.AppDatabase
 import com.example.wifiloggerapp.data.WifiEventEntity
 import com.example.wifiloggerapp.ui.MainActivity
+import com.example.wifiloggerapp.util.AppErrorLogger
+import com.example.wifiloggerapp.util.JalaliDateHelper
+import com.example.wifiloggerapp.util.NetworkAliasManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -76,14 +79,15 @@ class WifiLoggerService : Service() {
                     sendBroadcastIntent(context, eventType, ssid)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed direct logEvent", e)
+                    AppErrorLogger.logError(context, TAG, "خطا در ثبت مستقیم رویداد وای‌فای", e)
                 }
             }
         }
 
         fun appendDebugLog(context: Context, eventType: String, ssid: String?, bssid: String?) {
             try {
-                val shamsiTime = com.example.wifiloggerapp.util.JalaliDateHelper.formatShamsiDateTime(System.currentTimeMillis())
-                val alias = com.example.wifiloggerapp.util.NetworkAliasManager(context).getAlias(ssid)
+                val shamsiTime = JalaliDateHelper.formatShamsiDateTime(System.currentTimeMillis())
+                val alias = NetworkAliasManager(context).getAlias(ssid)
                 val displayName = if (alias != null) "$alias (${ssid ?: "<null>"})" else (ssid ?: "<null>")
                 val debugLine = "$shamsiTime | $eventType | $displayName | ${bssid ?: "<null>"}\n"
                 context.openFileOutput("wifi_debug.log", Context.MODE_APPEND).use {
@@ -91,6 +95,7 @@ class WifiLoggerService : Service() {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to write debug log", e)
+                AppErrorLogger.logError(context, TAG, "خطا در نوشتن لاگ عمومی", e)
             }
         }
 
@@ -102,7 +107,9 @@ class WifiLoggerService : Service() {
                     setPackage(context.packageName)
                 }
                 context.sendBroadcast(intent)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                AppErrorLogger.logError(context, TAG, "خطا در ارسال برودکست داخلی", e)
+            }
         }
     }
 
@@ -192,6 +199,7 @@ class WifiLoggerService : Service() {
             connectivityManager.registerNetworkCallback(request, networkCallback)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register network callback", e)
+            AppErrorLogger.logError(this, TAG, "خطا در ثبت NetworkCallback", e)
         }
 
         try {
@@ -199,6 +207,7 @@ class WifiLoggerService : Service() {
             registerReceiver(wifiStateReceiver, filter)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register broadcast receiver", e)
+            AppErrorLogger.logError(this, TAG, "خطا در ثبت گیرنده برودکست وای‌فای", e)
         }
     }
 
@@ -346,13 +355,14 @@ class WifiLoggerService : Service() {
                 updateNotification(eventType, cleanSsid)
             } catch (e: Exception) {
                 Log.w(TAG, "Error saving wifi event", e)
+                AppErrorLogger.logError(this@WifiLoggerService, TAG, "خطا در ذخیره رویداد در پایگاه داده", e)
             }
         }
     }
 
     private fun updateNotification(eventType: String, ssid: String) {
         try {
-            val alias = com.example.wifiloggerapp.util.NetworkAliasManager(this).getAlias(ssid)
+            val alias = NetworkAliasManager(this).getAlias(ssid)
             val displayName = if (alias != null) "$alias ($ssid)" else ssid
             val statusText = if (eventType == "CONNECTED") {
                 "متصل به: $displayName"
@@ -361,7 +371,9 @@ class WifiLoggerService : Service() {
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIFICATION_ID, buildNotification(statusText))
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppErrorLogger.logError(this, TAG, "خطا در به‌روزرسانی نوتیفیکیشن", e)
+        }
     }
 
     private fun createNotificationChannel() {
