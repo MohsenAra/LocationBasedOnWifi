@@ -5,12 +5,27 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <Button
-        android:id="@+id/btnTest"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="درج رویداد تست (Test Log)" />
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnTest"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="رویداد تست" />
+
+        <Button
+            android:id="@+id/btnManageAliases"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="نام‌گذاری شبکه" />
+    </LinearLayout>
 
     <Button
         android:id="@+id/btnShowServiceLogs"
@@ -19,11 +34,46 @@
         android:layout_marginTop="4dp"
         android:text="نمایش لاگ خام سرویس (Show Service Logs)" />
 
+    <!-- بخش فیلتر و جستجو -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/etFilter"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="🔍 فیلتر نام شبکه یا نام دلخواه..."
+            android:inputType="text"
+            android:padding="8dp"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btnClearFilter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="✕" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvFilterStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp"
+        android:text=""
+        android:textSize="12sp" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="4dp"
         android:fillViewport="true">
 
         <TextView

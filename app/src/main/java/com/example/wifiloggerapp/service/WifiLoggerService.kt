@@ -82,9 +82,10 @@ class WifiLoggerService : Service() {
 
         fun appendDebugLog(context: Context, eventType: String, ssid: String?, bssid: String?) {
             try {
-                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                val timeStr = sdf.format(Date())
-                val debugLine = "$timeStr | $eventType | ${ssid ?: "<null>"} | ${bssid ?: "<null>"}\n"
+                val shamsiTime = com.example.wifiloggerapp.util.JalaliDateHelper.formatShamsiDateTime(System.currentTimeMillis())
+                val alias = com.example.wifiloggerapp.util.NetworkAliasManager(context).getAlias(ssid)
+                val displayName = if (alias != null) "$alias (${ssid ?: "<null>"})" else (ssid ?: "<null>")
+                val debugLine = "$shamsiTime | $eventType | $displayName | ${bssid ?: "<null>"}\n"
                 context.openFileOutput("wifi_debug.log", Context.MODE_APPEND).use {
                     it.write(debugLine.toByteArray(Charsets.UTF_8))
                 }
@@ -351,10 +352,12 @@ class WifiLoggerService : Service() {
 
     private fun updateNotification(eventType: String, ssid: String) {
         try {
+            val alias = com.example.wifiloggerapp.util.NetworkAliasManager(this).getAlias(ssid)
+            val displayName = if (alias != null) "$alias ($ssid)" else ssid
             val statusText = if (eventType == "CONNECTED") {
-                "متصل به: $ssid"
+                "متصل به: $displayName"
             } else {
-                "قطع اتصال از: $ssid"
+                "قطع اتصال از: $displayName"
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIFICATION_ID, buildNotification(statusText))
