@@ -21,4 +21,7 @@ interface WifiEventDao {
 
     @Query("SELECT * FROM wifi_events WHERE ssid = :ssid AND timestamp BETWEEN :startTimestamp AND :endTimestamp ORDER BY timestamp ASC")
     suspend fun getEventsForSsidBetween(ssid: String, startTimestamp: Long, endTimestamp: Long): List<WifiEventEntity>
+
+    @Query("DELETE FROM wifi_events")
+    suspend fun deleteAll()
 }
