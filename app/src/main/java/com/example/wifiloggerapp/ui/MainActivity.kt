@@ -40,6 +40,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private val permissionRequestCode = 1001
+    private val backgroundLocationRequestCode = 1002
 
     private lateinit var btnManageAliases: Button
     private lateinit var btnErrorLogs: Button
@@ -92,7 +93,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecyclerView() {
         adapter = WifiEventAdapter(aliasManager) { event ->
             val ssid = event.ssid
-            if (!ssid.isNullOrBlank() && ssid != "<unknown ssid>") {
+            if (!ssid.isNullOrBlank() && ssid != "<unknown ssid>" && ssid != WifiLoggerService.UNKNOWN_SSID_READABLE) {
                 showEditAliasDialog(initialSsid = ssid, isNew = false)
             } else {
                 Toast.makeText(this, "امکان نام‌گذاری برای شبکه ناشناخته وجود ندارد", Toast.LENGTH_SHORT).show()
@@ -215,7 +216,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showManageAliasesDialog() {
         val knownSsids = allEvents.mapNotNull { it.ssid }
-            .filter { it.isNotBlank() && it != "<unknown ssid>" }
+            .filter { it.isNotBlank() && it != "<unknown ssid>" && it != WifiLoggerService.UNKNOWN_SSID_READABLE }
             .distinct()
             .toMutableList()
 
@@ -335,7 +336,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            startWifiService()
+            checkBackgroundLocationPermission()
         } else {
             ActivityCompat.requestPermissions(
                 this,
@@ -343,6 +344,49 @@ class MainActivity : AppCompatActivity() {
                 permissionRequestCode
             )
         }
+    }
+
+    private fun checkBackgroundLocationPermission() {
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasFineLocation) {
+            val hasBackgroundLocation = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasBackgroundLocation) {
+                showBackgroundLocationDialog()
+                return
+            }
+        }
+        startWifiService()
+    }
+
+    private fun showBackgroundLocationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("نیاز به مجوز مکان دائمی")
+            .setMessage(
+                "برای اینکه سرویس بتواند در پس‌زمینه نیز نام شبکه وای‌فای (SSID) را بدون خطای <unknown ssid> بخواند و ثبت کند، لطفاً در صفحه بعدی یا تنظیمات مجوز مکان برنامه، گزینه «Allow all the time» (اجازه در همه حال) را انتخاب کنید."
+            )
+            .setPositiveButton("تنظیم مجوز") { _, _ ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                        backgroundLocationRequestCode
+                    )
+                }
+                startWifiService()
+            }
+            .setNegativeButton("بعداً") { _, _ ->
+                startWifiService()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun startWifiService() {
@@ -365,14 +409,26 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == permissionRequestCode) {
-            val allGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-            if (allGranted) {
-                Toast.makeText(this, "دسترسی‌ها تایید شدند. سرویس پایش فعال شد.", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "توجه: بدون مجوز مکان (Location)، اندروید نام وای‌فای (SSID) را پنهان می‌کند.", Toast.LENGTH_LONG).show()
+        when (requestCode) {
+            permissionRequestCode -> {
+                val allGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                if (allGranted) {
+                    Toast.makeText(this, "دسترسی‌های اولیه تایید شدند.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "توجه: بدون مجوز مکان (Location)، اندروید نام وای‌فای (SSID) را پنهان می‌کند.", Toast.LENGTH_LONG).show()
+                }
+                checkBackgroundLocationPermission()
             }
-            startWifiService()
+            backgroundLocationRequestCode -> {
+                val bgGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (bgGranted) {
+                    Toast.makeText(this, "مجوز مکان دائمی تایید شد. سرویس پایش فعال است.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "بدون گزینه Allow all the time، در پس‌زمینه ممکن است نام وای‌فای ناشناس ثبت شود.", Toast.LENGTH_LONG).show()
+                }
+                startWifiService()
+            }
         }
     }
 }

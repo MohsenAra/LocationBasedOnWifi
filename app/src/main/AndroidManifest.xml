@@ -9,6 +9,7 @@
     <!-- دسترسی‌های موقعیت مکانی جهت خواندن SSID -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- دسترسی‌های سرویس پس‌زمینه برای اندروید 13 و 14 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

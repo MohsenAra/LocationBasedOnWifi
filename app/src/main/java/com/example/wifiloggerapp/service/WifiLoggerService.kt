@@ -29,6 +29,7 @@ import com.example.wifiloggerapp.util.JalaliDateHelper
 import com.example.wifiloggerapp.util.NetworkAliasManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -47,14 +48,21 @@ class WifiLoggerService : Service() {
     private var currentBssid: String? = null
     private var isConnected: Boolean = false
 
-    private var lastLoggedEventType: String? = null
-    private var lastLoggedSsid: String? = null
-    private var lastLoggedTimestamp: Long = 0L
+    private var lastConnectedSsid: String? = null
+    private var lastEventType: String? = null
+    private var lastEventTimestamp: Long = 0L
+
+    private var connectJob: Job? = null
+    private var activeNetwork: Network? = null
+    private var latestCapabilities: NetworkCapabilities? = null
 
     companion object {
         private const val TAG = "WifiLoggerService"
         private const val CHANNEL_ID = "wifi_logger_channel"
         private const val NOTIFICATION_ID = 101
+
+        const val UNKNOWN_SSID_READABLE = "شبکه ناشناس (نیاز به مجوز مکان دائمی)"
+        private const val CONNECT_DEBOUNCE_MS = 1500L
 
         const val ACTION_LOG_EVENT = "com.example.wifiloggerapp.ACTION_LOG_EVENT"
         const val EXTRA_EVENT_TYPE = "extra_event_type"
@@ -113,21 +121,48 @@ class WifiLoggerService : Service() {
         }
     }
 
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            Log.i(TAG, "NetworkCallback onAvailable")
-            handleWifiConnected(network)
-        }
+    private val networkCallback: ConnectivityManager.NetworkCallback = createNetworkCallback()
 
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            Log.i(TAG, "NetworkCallback onCapabilitiesChanged")
-            handleWifiConnected(network, networkCapabilities)
+    private fun createNetworkCallback(): ConnectivityManager.NetworkCallback {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+                override fun onAvailable(network: Network) = onWifiAvailable(network)
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) =
+                    onWifiCapabilitiesChanged(network, networkCapabilities)
+                override fun onLost(network: Network) = onWifiLost(network)
+            }
+        } else {
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = onWifiAvailable(network)
+                override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) =
+                    onWifiCapabilitiesChanged(network, networkCapabilities)
+                override fun onLost(network: Network) = onWifiLost(network)
+            }
         }
+    }
 
-        override fun onLost(network: Network) {
-            Log.i(TAG, "NetworkCallback onLost")
-            handleWifiDisconnected()
+    private fun onWifiAvailable(network: Network) {
+        Log.i(TAG, "NetworkCallback onAvailable")
+        activeNetwork = network
+        handleWifiConnected(network, latestCapabilities)
+    }
+
+    private fun onWifiCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+        Log.i(TAG, "NetworkCallback onCapabilitiesChanged")
+        activeNetwork = network
+        latestCapabilities = networkCapabilities
+        handleWifiConnected(network, networkCapabilities)
+    }
+
+    private fun onWifiLost(network: Network) {
+        Log.i(TAG, "NetworkCallback onLost")
+        if (activeNetwork != null && activeNetwork != network) {
+            Log.d(TAG, "Ignoring onLost for non-active network")
+            return
         }
+        activeNetwork = null
+        latestCapabilities = null
+        handleWifiDisconnected()
     }
 
     private val wifiStateReceiver = object : BroadcastReceiver() {
@@ -229,39 +264,43 @@ class WifiLoggerService : Service() {
         }
     }
 
+    @Synchronized
     private fun handleWifiConnected(network: Network?, capabilities: NetworkCapabilities? = null) {
-        serviceScope.launch {
-            var (ssid, bssid) = extractWifiInfo(network, capabilities)
+        connectJob?.cancel()
+        connectJob = serviceScope.launch {
+            // Wait for DHCP & network capabilities to settle so real SSID replaces <unknown ssid>
+            delay(CONNECT_DEBOUNCE_MS)
 
-            if (ssid == null && bssid == null) {
-                // Wait briefly in case Wi-Fi info resolution takes a moment
-                delay(800)
-                val retry = extractWifiInfo(network, capabilities)
-                ssid = retry.first
-                bssid = retry.second
+            val effectiveCaps = latestCapabilities ?: capabilities
+            val (ssid, bssid) = extractWifiInfo(network, effectiveCaps)
+            val validSsid = ssid ?: UNKNOWN_SSID_READABLE
+
+            if (lastEventType == "CONNECTED" && lastConnectedSsid == validSsid) {
+                Log.d(TAG, "Already connected to $validSsid, skipping duplicate CONNECTED")
+                return@launch
             }
 
-            val validSsid = ssid ?: "<unknown ssid>"
-
-            if (currentSsid != null && currentSsid != validSsid && isConnected && currentSsid != "<unknown ssid>") {
-                logEventInternal("DISCONNECTED", currentSsid, currentBssid)
+            if (lastEventType == "CONNECTED" && lastConnectedSsid != null && lastConnectedSsid != validSsid) {
+                if (lastConnectedSsid != UNKNOWN_SSID_READABLE) {
+                    logEventInternal("DISCONNECTED", currentSsid ?: lastConnectedSsid, currentBssid)
+                }
             }
 
-            val shouldLog = !isConnected || currentSsid != validSsid || (currentSsid == "<unknown ssid>" && validSsid != "<unknown ssid>")
             currentSsid = validSsid
             currentBssid = bssid ?: currentBssid
             isConnected = true
 
-            if (shouldLog) {
-                logEventInternal("CONNECTED", currentSsid, currentBssid)
-            }
+            logEventInternal("CONNECTED", currentSsid, currentBssid)
         }
     }
 
+    @Synchronized
     private fun handleWifiDisconnected() {
+        connectJob?.cancel()
+        connectJob = null
         serviceScope.launch {
-            if (isConnected) {
-                val oldSsid = currentSsid ?: "<unknown ssid>"
+            if (isConnected || lastEventType == "CONNECTED") {
+                val oldSsid = currentSsid ?: lastConnectedSsid ?: UNKNOWN_SSID_READABLE
                 val oldBssid = currentBssid
                 isConnected = false
                 currentSsid = null
@@ -279,7 +318,7 @@ class WifiLoggerService : Service() {
         var detectedSsid: String? = null
         var detectedBssid: String? = null
 
-        // Method 1: NetworkCapabilities (API 29+)
+        // Method 1: NetworkCapabilities.transportInfo (API 29+, primary on API 31+ with FLAG_INCLUDE_LOCATION_INFO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val caps = capabilities ?: (if (network != null) connectivityManager.getNetworkCapabilities(network) else null)
             val transportInfo = caps?.transportInfo
@@ -292,8 +331,8 @@ class WifiLoggerService : Service() {
             }
         }
 
-        // Method 2: WifiManager.connectionInfo
-        if (detectedSsid == null) {
+        // Method 2: Legacy WifiManager.connectionInfo fallback only on API < 31 (deprecated in API 31+)
+        if (detectedSsid == null && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             try {
                 val info = wifiManager.connectionInfo
                 if (info != null && info.networkId != -1) {
@@ -326,16 +365,21 @@ class WifiLoggerService : Service() {
     @Synchronized
     private fun logEventInternal(eventType: String, ssid: String?, bssid: String?) {
         val now = System.currentTimeMillis()
-        val cleanSsid = ssid ?: "<unknown ssid>"
+        val cleanSsid = if (ssid.isNullOrBlank() || ssid == "<unknown ssid>") UNKNOWN_SSID_READABLE else ssid
 
-        // Deduplication: suppress identical event within 3 seconds
-        if (eventType == lastLoggedEventType && cleanSsid == lastLoggedSsid && (now - lastLoggedTimestamp) < 3000) {
-            Log.d(TAG, "Suppressed duplicate event: $eventType $cleanSsid")
+        // Prevent consecutive duplicate events (same eventType & SSID, or same eventType within 1.5s)
+        if (eventType == lastEventType && cleanSsid == lastConnectedSsid) {
+            Log.d(TAG, "Suppressed duplicate state event: $eventType $cleanSsid")
             return
         }
-        lastLoggedEventType = eventType
-        lastLoggedSsid = cleanSsid
-        lastLoggedTimestamp = now
+        if (eventType == lastEventType && (now - lastEventTimestamp) < CONNECT_DEBOUNCE_MS) {
+            Log.d(TAG, "Suppressed rapid duplicate event: $eventType $cleanSsid")
+            return
+        }
+
+        lastEventType = eventType
+        lastConnectedSsid = cleanSsid
+        lastEventTimestamp = now
 
         Log.i(TAG, "Logging Wi-Fi event: $eventType | SSID=$cleanSsid | BSSID=$bssid")
 
