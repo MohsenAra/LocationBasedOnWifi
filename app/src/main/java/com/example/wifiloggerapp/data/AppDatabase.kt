@@ -16,7 +16,9 @@ abstract class AppDatabase : RoomDatabase() {
                             context.applicationContext,
                             AppDatabase::class.java,
                             "wifi_logger_db"
-                        ).build()
+                        )
+                            .fallbackToDestructiveMigration()
+                            .build()
                     }
                 }
             }

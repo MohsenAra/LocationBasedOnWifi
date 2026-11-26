@@ -6,8 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -66,15 +68,34 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        try {
+            setContentView(R.layout.activity_main)
 
-        aliasManager = NetworkAliasManager(this)
+            aliasManager = NetworkAliasManager(this)
 
-        initViews()
-        setupRecyclerView()
-        setupListeners()
-        observeEvents()
-        checkPermissionsAndStartService()
+            initViews()
+            setupRecyclerView()
+            setupListeners()
+            observeEvents()
+            checkPermissionsAndStartService()
+        } catch (e: Throwable) {
+            AppErrorLogger.logError(this, "MainActivity", "خطای بحرانی در شروع برنامه", e)
+            val stackTrace = e.stackTraceToString()
+            try {
+                AlertDialog.Builder(this)
+                    .setTitle("خطا در اجرای برنامه")
+                    .setMessage(stackTrace)
+                    .setPositiveButton("بستن", null)
+                    .show()
+            } catch (_: Throwable) {
+                val tv = TextView(this).apply {
+                    text = stackTrace
+                    setPadding(32, 32, 32, 32)
+                    setTextIsSelectable(true)
+                }
+                setContentView(tv)
+            }
+        }
     }
 
     private fun initViews() {
@@ -370,15 +391,17 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("نیاز به مجوز مکان دائمی")
             .setMessage(
-                "برای اینکه سرویس بتواند در پس‌زمینه نیز نام شبکه وای‌فای (SSID) را بدون خطای <unknown ssid> بخواند و ثبت کند، لطفاً در صفحه بعدی یا تنظیمات مجوز مکان برنامه، گزینه «Allow all the time» (اجازه در همه حال) را انتخاب کنید."
+                "برای اینکه سرویس بتواند در پس‌زمینه نیز نام شبکه وای‌فای (SSID) را بدون خطای <unknown ssid> بخواند و ثبت کند، لطفاً در تنظیمات برنامه (Permissions -> Location) گزینه «Allow all the time» (اجازه در همه حال) را انتخاب کنید."
             )
-            .setPositiveButton("تنظیم مجوز") { _, _ ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ActivityCompat.requestPermissions(
-                        this,
-                        arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
-                        backgroundLocationRequestCode
-                    )
+            .setPositiveButton("باز کردن تنظیمات") { _, _ ->
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    AppErrorLogger.logError(this, "MainActivity", "خطا در باز کردن تنظیمات برنامه", e)
+                    Toast.makeText(this, "لطفاً به صورت دستی از تنظیمات گوشی گزینه Allow all the time را فعال کنید.", Toast.LENGTH_LONG).show()
                 }
                 startWifiService()
             }
